@@ -1,0 +1,193 @@
+---
+title: "WineClustering"
+author: "Duc-Anh Nguyen"
+date: "2025-02-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## First structure with k-means and hierarchical
+```{r}
+library(tidyverse)
+discs = read.csv("discs.txt", header = F)
+head(discs)
+dim(discs)
+ggplot(data = discs, aes(x = V1, y = V2)) + geom_point()
+```
+We get to see that there are clearly 3 clusters. Let us do hierarchical clustering with centroid and square euclidean distance.
+### hierchical clustering
+```{r}
+dist_euc12 = dist(discs, method = "euclidean")^2
+centroid = hclust(dist_euc12, method = "centroid")
+
+# visualising
+centroid3 = cutree(centroid, k= 3)
+discs$hc3 = as.factor(centroid3)
+ggplot(mapping = aes(x = V1, y = V2, color = hc3), data = discs) + geom_point()
+```
+
+Although most of the points are nicely clustered, we see some outliers that are not supposed to be in the assigned cluster.
+
+
+### k-means clustering
+Now we will try to find the most suitable number of clusters for the dataset, by trying the kmeans() algorithm for 9 different numbers of clusters from 2 clusters to 10 clusters. 
+```{r}
+set.seed(123)
+
+km_list = list()
+wss = c()
+for(k in 1:10) {
+  km_list[[k]] = kmeans(
+    x = discs[, 1:2],
+    centers = k,
+    iter.max = 100,
+    nstart = 100
+  )
+  wss[k] = sum(km_list[[k]]$withinss)
+}
+
+par(mfrow = c(1, 1))
+plot(1:10,
+     wss,
+     type = "b",
+     xlab = "# of clusters",
+     ylab = "Sum of squared distances")
+
+```
+This alligns with our intuition, that there should be 3 clusters!
+
+
+
+```{r}
+
+library(gridExtra)
+discs$km3 = as.factor(km_list[[3]]$cluster)
+p1 = ggplot(data = discs, aes(x = V1, y = V2, color = hc3)) + geom_point()
+p2 = ggplot(data = discs, aes(x = V1, y = V2, color = km3)) + geom_point()
+grid.arrange(p1, p2, ncol = 2)
+
+```
+The two results do not make much of a different, and both perform well!
+
+
+## Second structure with k-means, hierarchical and DBSCAN
+Moving to our second structure: here we will see right away that there should be 2 main clusters with a few noise points.
+```{r}
+ellipse = read.csv("ellipsegarland.txt", header = F)
+head(ellipse)
+dim(ellipse)
+ggplot(data = ellipse, aes(x = V1, y = V2)) + geom_point()
+
+```
+It seems like we will have two clusters. Let us try both hierarchical and kmeans
+```{r}
+## hierachical
+ellipse_euc12 = dist(ellipse, method = "euclidean")^2
+centroid_ellipse = hclust(ellipse_euc12, method = "centroid")
+# visualising
+centroid2_ellipse = cutree(centroid_ellipse, k= 2)
+ellipse$hc2 = as.factor(centroid2_ellipse)
+ggplot(mapping = aes(x = V1, y = V2, color = hc2), data = ellipse) + geom_point()
+
+
+## k-means
+set.seed(1234)
+km_list = list()
+wss = c()
+for (k in 1:10) {
+  km_list[[k]] = kmeans(
+    x = ellipse[, 1:2],
+    centers = k,
+    iter.max = 100,
+    nstart = 100
+  )
+  wss[k] = sum(km_list[[k]]$withinss)
+}
+par(mfrow = c(1, 1))
+plot(1:10,
+     wss,
+     type = "b",
+     xlab = "# of clusters",
+     ylab = "Sum of squared distances")
+# number of clusters should be 4!
+ellipse$km4 = as.factor(km_list[[4]]$cluster)
+p1 = ggplot(data = ellipse, aes(x = V1, y = V2, color = hc2)) + geom_point()
+p2 = ggplot(data = ellipse, aes(x = V1, y = V2, color = km4)) + geom_point()
+grid.arrange(p1, p2, ncol = 2)
+```
+*DBSCAN* might be more suitable in this situation! 
+
+## DBSCAN
+
+For this algorithm we need to define 
++ the parameter ε: the max. distance/radius that create an epsilon-Neighbourhood around a point - any points inside this neighbourhood should be in the same cluster with the center point
++ and minPts: the minimum amount of points should be in one neighbourhoof in order to consider that neighbourhood a cluster. For this Schubert et al. (2017) recommend that we set the value as dopple of the dim of data. (see Erich Schubert, J¨ org Sander, Martin Ester, Hans Peter Kriegel, und Xiaowei Xu. 2017. DBSCAN Revisited, Revisited: Why and How You Should (Still) Use DBSCAN. ACM Trans. Database Syst. 42, 3, Artikel 19 (September 2017), 21 Seiten. https://doi.org/10.1145/3068335)
+
+Let us now try to find the optimal ε
+```{r}
+# install.packages("dbscan")
+library(dbscan)
+minPts = 2 * 2
+k = minPts - 1
+dbscan::kNNdistplot(ellipse[, 1:2], k = k, minPts = minPts)
+
+```
+The epsilon should be by the "elbow" which is approx. 0.3
+
+```{r}
+dbs = dbscan(ellipse[,1:2], eps = .3, minPts = minPts)
+dbs
+# we have 2 clusters and 10 noise points
+ellipse$dbs = as.factor(dbs$cluster)
+p1 = ggplot(data = ellipse, aes(x = V1, y = V2, color = hc2)) + geom_point()
+p2 = ggplot(data = ellipse, aes(x = V1, y = V2, color = km4)) + geom_point()
+p3 = ggplot(data = ellipse, aes(x = V1, y = V2, color = dbs)) + geom_point()
+grid.arrange(p1, p2, p3, ncol = 1, nrow = 3)
+```
+
+
+
+```{r}
+dbs = dbscan(ellipse[,1:2], eps = .3, minPts = minPts)
+dbs
+# we have 2 clusters and 10 noise points
+ellipse$dbs = as.factor(dbs$cluster)
+p1 = ggplot(data = ellipse, aes(x = V1, y = V2, color = hc2)) + geom_point()
+p2 = ggplot(data = ellipse, aes(x = V1, y = V2, color = km4)) + geom_point()
+p3 = ggplot(data = ellipse, aes(x = V1, y = V2, color = dbs)) + geom_point()
+grid.arrange(p1, p2, p3, ncol = 1, nrow = 3)
+```
+
+## Third structure with model-based clustering
+With this third case, we have our dataset of dim 14, which would be hard to visualise and on that cluster. Here we will use model-based clustering with gaussian assumption, then get the best model with the best BIC (in the case of Mclust() algo the largest BIC value!). Then we will visualise our result in 2 dimension space, selecting only the first two PCs!
+```{r}
+#install.packages("gclus")
+library(gclus)
+library(mclust)
+library(ggplot2)
+library(factoextra)
+data(wine, package = "gclus")
+dim(wine)
+head(wine)
+```
+
+So in this dataset the wines are already labeled to class. Let us try to labels them our self though
+```{r}
+X <- wine |>
+  dplyr::select(-Class) |>
+  as.matrix()
+mod <- Mclust(X)
+# best model here should have the highest BIC because of multiplication with -1
+summary(mod$BIC)
+
+# plot the BIC
+factoextra::fviz_mclust(mod, what = "BIC", print.summary = FALSE)
+
+# plot the classification
+factoextra::fviz_mclust(mod, geom="point")
+```
+
